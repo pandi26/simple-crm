@@ -1,4 +1,5 @@
 const Lead = require("../models/Lead");
+const LeadActivity = require("../models/LeadActivity");
 
 // Create Lead
 const createLead = async (req, res) => {
@@ -62,6 +63,11 @@ const getLeads = async (req, res) => {
     // Build filter
     const filter = {};
 
+    // Sales users can only see their assigned leads
+    if (req.user.role === "sales") {
+      filter.assignedTo = req.user._id;
+    }
+
     // Search by name, email or company
     if (search) {
       filter.$or = [
@@ -87,13 +93,13 @@ const getLeads = async (req, res) => {
 
     const skip = (pageNumber - 1) * limitNumber;
 
-    // Get leads
     const leads = await Lead.find(filter)
+      .populate("assignedTo", "name email role")
+      .populate("createdBy", "name email")
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limitNumber);
 
-    // Total matching leads
     const total = await Lead.countDocuments(filter);
 
     return res.status(200).json({
@@ -116,6 +122,35 @@ const getLeads = async (req, res) => {
 // Get Single Lead
 const getLeadById = async (req, res) => {
   try {
+    const lead = await Lead.findById(req.params.id)
+      .populate("assignedTo", "name email role")
+      .populate("createdBy", "name email");
+
+    if (!lead) {
+      return res.status(404).json({
+        message: "Lead not found",
+      });
+    }
+
+    return res.status(200).json({
+      lead,
+    });
+  } catch (error) {
+    console.error("Get Lead By ID Error:", error);
+
+    return res.status(500).json({
+      message: error.message,
+    });
+  }
+};
+
+
+
+
+// Update Lead
+// Update Lead
+const updateLead = async (req, res) => {
+  try {
     const lead = await Lead.findById(req.params.id);
 
     if (!lead) {
@@ -124,29 +159,75 @@ const getLeadById = async (req, res) => {
       });
     }
 
-    return res.status(200).json({
-      lead,
-    });
+    // Sales can update only their assigned leads
+    if (
+      req.user.role === "sales" &&
+      String(lead.assignedTo) !== String(req.user._id)
+    ) {
+      return res.status(403).json({
+        message: "You can only update your assigned leads",
+      });
+    }
 
+    // Sales cannot change assignment
+    if (
+      req.user.role === "sales" &&
+      req.body.assignedTo
+    ) {
+      return res.status(403).json({
+        message: "Sales users cannot reassign leads",
+      });
+    }
+
+    // Store old status
+    const oldStatus = lead.status;
+
+    // Update lead
+    Object.assign(lead, req.body);
+
+    await lead.save();
+
+    // Check whether status changed
+    if (req.body.status && req.body.status !== oldStatus) {
+      await LeadActivity.create({
+        lead: lead._id,
+        user: req.user._id,
+        type: "status_change",
+        description: `Status changed from ${oldStatus} to ${lead.status}`,
+      });
+    }
+
+    const updatedLead = await Lead.findById(lead._id)
+      .populate("assignedTo", "name email role")
+      .populate("createdBy", "name email");
+
+    return res.status(200).json({
+      message: "Lead updated successfully",
+      lead: updatedLead,
+    });
   } catch (error) {
-    console.error("Get Lead Error:", error.message);
+    console.error("Update Lead Error:", error.message);
 
     return res.status(500).json({
       message: error.message,
     });
   }
 };
-// Update Lead
-const updateLead = async (req, res) => {
+
+
+// Assign Lead to a User
+// Assign Lead
+const assignLead = async (req, res) => {
   try {
-    const lead = await Lead.findByIdAndUpdate(
-      req.params.id,
-      req.body,
-      {
-        new: true,
-        runValidators: true,
-      }
-    );
+    const { assignedTo } = req.body;
+
+    if (!assignedTo) {
+      return res.status(400).json({
+        message: "assignedTo is required",
+      });
+    }
+
+    const lead = await Lead.findById(req.params.id);
 
     if (!lead) {
       return res.status(404).json({
@@ -154,13 +235,29 @@ const updateLead = async (req, res) => {
       });
     }
 
-    return res.status(200).json({
-      message: "Lead updated successfully",
-      lead,
+    // Save assigned user
+    lead.assignedTo = assignedTo;
+
+    await lead.save();
+
+    // Create automatic activity
+    await LeadActivity.create({
+      lead: lead._id,
+      user: req.user._id,
+      type: "assignment",
+      description: `Lead assigned to user ${assignedTo}`,
     });
 
+    const updatedLead = await Lead.findById(lead._id)
+      .populate("assignedTo", "name email role")
+      .populate("createdBy", "name email");
+
+    return res.status(200).json({
+      message: "Lead assigned successfully",
+      lead: updatedLead,
+    });
   } catch (error) {
-    console.error("Update Lead Error:", error.message);
+    console.error("Assign Lead Error:", error.message);
 
     return res.status(500).json({
       message: error.message,
@@ -191,11 +288,11 @@ const deleteLead = async (req, res) => {
     });
   }
 };
-
 module.exports = {
   createLead,
   getLeads,
   getLeadById,
   updateLead,
   deleteLead,
+  assignLead,
 };

@@ -1,30 +1,38 @@
-const authorize =(...role)=>{
-
-    return (req, res, next)=>{
-        if(!roles.includes(req.user.role)){
-            return res.status(403).json({
-                message:"Access denied.you dont have permission."
-            });
-        }
-        next();
-
-    };
-};
-
-const adminOnly=(req, res, next)=>{
-    if(!req.user){
-return res.status(401).json({
-    message:"not Authorized",
-});
+const authorize = (...roles) => {
+  return (req, res, next) => {
+    if (!req.user) {
+      return res.status(401).json({
+        message: "Not authorized",
+      });
     }
 
-    if(req.user.role !=="admin"){
-        return res.status(403).json({
-            message:"access denied. admin only",
-        });
+    if (!roles.includes(req.user.role)) {
+      return res.status(403).json({
+        message: "Access denied. You don't have permission.",
+      });
     }
+
     next();
+  };
 };
 
+const adminOnly = (req, res, next) => {
+  if (!req.user) {
+    return res.status(401).json({
+      message: "Not authorized",
+    });
+  }
 
-module.exports ={authorize,adminOnly};
+  if (req.user.role !== "admin") {
+    return res.status(403).json({
+      message: "Access denied. Admin only.",
+    });
+  }
+
+  next();
+};
+
+module.exports = {
+  authorize,
+  adminOnly,
+};

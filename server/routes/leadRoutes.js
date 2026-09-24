@@ -1,30 +1,59 @@
 const express = require("express");
 
-const router = express.Router();
-
 const {
   createLead,
   getLeads,
   getLeadById,
   updateLead,
   deleteLead,
+  assignLead,
 } = require("../controllers/leadController");
 
 const { protect } = require("../middleware/authMiddleware");
+const { authorize, adminOnly } = require("../middleware/roleMiddleware");
 
-// Create Lead
-router.post("/", protect, createLead);
+const router = express.Router();
 
-// Get All Leads
-router.get("/", protect, getLeads);
+router.post(
+  "/",
+  protect,
+  authorize("admin", "sales"),
+  createLead
+);
 
-// Get Single Lead
-router.get("/:id", protect, getLeadById);
+router.get(
+  "/",
+  protect,
+  authorize("admin", "sales"),
+  getLeads
+);
 
-// Update Lead
-router.put("/:id", protect, updateLead);
+router.get(
+  "/:id",
+  protect,
+  authorize("admin", "sales"),
+  getLeadById
+);
 
-// Delete Lead
-router.delete("/:id", protect, deleteLead);
+router.put(
+  "/:id",
+  protect,
+  authorize("admin", "sales"),
+  updateLead
+);
+
+router.put(
+  "/:id/assign",
+  protect,
+  adminOnly,
+  assignLead
+);
+
+router.delete(
+  "/:id",
+  protect,
+  adminOnly,
+  deleteLead
+);
 
 module.exports = router;

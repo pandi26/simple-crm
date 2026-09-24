@@ -17,7 +17,7 @@ const customer =await Customer.create({
     phone,
     company,
     status,
-    createBy:req._id,
+    createdBy: req.user._id,
 
 });
 
@@ -78,29 +78,38 @@ const getCustomerById= async (req, res)=>{
 };
 
 
-const updateCustomer =async (req, res)=>{
-    try{
-        const  customer =await Customer.findByIdAndUpdate(
-            req.param.id, 
-            req.body,
-            {
-                new:true,
-                runValidator:true,
-            }
+const updateCustomer = async (req, res) => {
+  try {
+    const customer = await Customer.findById(req.params.id);
 
-    );
-    if(!customer){
-        return res.status(404).json({
-            message:"customer not found",
-        });
+    if (!customer) {
+      return res.status(404).json({
+        message: "Customer not found",
+      });
     }
-     return res.status(200).json({
+
+    const {
+      name,
+      email,
+      phone,
+      company,
+      status,
+    } = req.body;
+
+    customer.name = name ?? customer.name;
+    customer.email = email ?? customer.email;
+    customer.phone = phone ?? customer.phone;
+    customer.company = company ?? customer.company;
+    customer.status = status ?? customer.status;
+
+    await customer.save();
+
+    return res.status(200).json({
       message: "Customer updated successfully",
       customer,
     });
-}
-      catch (error) {
-    console.error("Update Customer Error:", error.message);
+  } catch (error) {
+    console.error("Update Customer Error:", error);
 
     return res.status(500).json({
       message: error.message,

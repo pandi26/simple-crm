@@ -1,49 +1,61 @@
-const express =require("express");
+const express = require("express");
 
 const {
-    registerUser,
-  loginUser,
-}=require("../controller/authController");
+  getUsers,
+  getUserById,
+  createUser,
+  updateUser,
+  deleteUser,
+} = require("../controllers/userController");
 
-const {protect} =require("../middleware/authMiddleware");
-const {authorize}=require("../middleware/roleMiddleware");
+const {
+  protect,
+} = require("../middleware/authMiddleware");
+
+const {
+  adminOnly,
+} = require("../middleware/roleMiddleware");
 
 const router = express.Router();
 
-router.post("/register", registerUser);
-router.post("/login",loginUser);
-
-//protected route -any logged user
+// Get all users
 router.get(
-    "/profile",
-    protect,
-    (req, res)=>{
-        res.status(200).json({
-            message:"profile accessed successfully",
-            user: req.user
-        });
-    }
+  "/",
+  protect,
+  adminOnly,
+  getUsers
 );
 
-router.get({
-    "/admin",
-    protect,
-    (req, res)=>{
-        res.status(200).json({
-            message:"admin accessed successfully",
-        });
-    }
-});
+// Get single user
+router.get(
+  "/:id",
+  protect,
+  adminOnly,
+  getUserById
+);
 
-router.get({
-    "/sales",
-    protect
-    (req, res)=>{
-        res.status(200).json({
-            message:"sales accessed successfully",
-        })
-    }
-});
+// Create user
+router.post(
+  "/",
+  protect,
+  adminOnly,
+  createUser
+);
 
-module.exports= router;
+// Update user
+router.put(
+  "/:id",
+  protect,
+  adminOnly,
+  updateUser
+);
 
+// Delete user
+router.delete(
+  "/:id",
+  protect,
+  adminOnly,
+  deleteUser
+);
+
+module.exports = router;
