@@ -9,25 +9,41 @@ import Navbar from "../../components/Navbar";
 
 export default function LeadDetailsPage() {
   const params = useParams();
-  const id = params?.id;
-
   const router = useRouter();
 
+  const id = params?.id;
+
+  // =========================
   // Lead
+  // =========================
+
   const [lead, setLead] = useState(null);
 
+  // =========================
   // Activities
+  // =========================
+
   const [activities, setActivities] = useState([]);
   const [activityType, setActivityType] = useState("note");
-  const [activityDescription, setActivityDescription] = useState("");
-  const [activityLoading, setActivityLoading] = useState(false);
+  const [activityDescription, setActivityDescription] =
+    useState("");
+  const [activityLoading, setActivityLoading] =
+    useState(false);
 
-  // Sales users
+  // =========================
+  // Sales Users
+  // =========================
+
   const [salesUsers, setSalesUsers] = useState([]);
-  const [selectedSalesUser, setSelectedSalesUser] = useState("");
-  const [assignLoading, setAssignLoading] = useState(false);
+  const [selectedSalesUser, setSelectedSalesUser] =
+    useState("");
+  const [assignLoading, setAssignLoading] =
+    useState(false);
 
+  // =========================
   // Page
+  // =========================
+
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
 
@@ -91,9 +107,14 @@ export default function LeadDetailsPage() {
         }
       );
 
-      setActivities(response.data.activities || []);
+      setActivities(
+        response.data.activities || []
+      );
     } catch (error) {
-      console.error("Get Activities Error:", error);
+      console.error(
+        "Get Activities Error:",
+        error
+      );
     }
   };
 
@@ -153,11 +174,17 @@ export default function LeadDetailsPage() {
 
       const token = localStorage.getItem("token");
 
+      if (!token) {
+        router.replace("/login");
+        return;
+      }
+
       await axios.post(
         `http://localhost:5000/api/leads/${id}/activities`,
         {
           type: activityType,
-          description: activityDescription.trim(),
+          description:
+            activityDescription.trim(),
         },
         {
           headers: {
@@ -171,7 +198,9 @@ export default function LeadDetailsPage() {
 
       await fetchActivities();
 
-      setMessage("Activity added successfully!");
+      setMessage(
+        "Activity added successfully!"
+      );
     } catch (error) {
       console.error(
         "Add Activity Error:",
@@ -193,7 +222,9 @@ export default function LeadDetailsPage() {
 
   const handleAssignLead = async () => {
     if (!selectedSalesUser) {
-      setMessage("Please select a sales user");
+      setMessage(
+        "Please select a sales user"
+      );
       return;
     }
 
@@ -202,6 +233,11 @@ export default function LeadDetailsPage() {
       setMessage("");
 
       const token = localStorage.getItem("token");
+
+      if (!token) {
+        router.replace("/login");
+        return;
+      }
 
       await axios.put(
         `http://localhost:5000/api/leads/${id}/assign`,
@@ -215,7 +251,9 @@ export default function LeadDetailsPage() {
         }
       );
 
-      setMessage("Lead assigned successfully!");
+      setMessage(
+        "Lead assigned successfully!"
+      );
 
       setSelectedSalesUser("");
 
@@ -262,9 +300,17 @@ export default function LeadDetailsPage() {
 
   if (loading) {
     return (
-      <p style={{ padding: "30px" }}>
-        Loading lead...
-      </p>
+      <div className="crm-layout">
+        <Sidebar />
+
+        <div className="main-section">
+          <Navbar />
+
+          <main className="dashboard-content">
+            <p>Loading lead...</p>
+          </main>
+        </div>
+      </div>
     );
   }
 
@@ -274,21 +320,31 @@ export default function LeadDetailsPage() {
 
   if (!lead) {
     return (
-      <div style={{ padding: "30px" }}>
-        <h2>Lead not found</h2>
+      <div className="crm-layout">
+        <Sidebar />
 
-        <p>{message}</p>
+        <div className="main-section">
+          <Navbar />
 
-        <button
-          onClick={() => router.push("/leads")}
-          style={{
-            marginTop: "15px",
-            padding: "10px 15px",
-            cursor: "pointer",
-          }}
-        >
-          Back to Leads
-        </button>
+          <main className="dashboard-content">
+            <h2>Lead not found</h2>
+
+            <p>{message}</p>
+
+            <button
+              onClick={() =>
+                router.push("/leads")
+              }
+              style={{
+                marginTop: "15px",
+                padding: "10px 15px",
+                cursor: "pointer",
+              }}
+            >
+              Back to Leads
+            </button>
+          </main>
+        </div>
       </div>
     );
   }
@@ -299,11 +355,9 @@ export default function LeadDetailsPage() {
 
   return (
     <div className="crm-layout">
-
       <Sidebar />
 
       <div className="main-section">
-
         <Navbar />
 
         <main className="dashboard-content">
@@ -311,7 +365,9 @@ export default function LeadDetailsPage() {
           {/* Back Button */}
 
           <button
-            onClick={() => router.push("/leads")}
+            onClick={() =>
+              router.push("/leads")
+            }
             style={{
               marginBottom: "20px",
               padding: "8px 15px",
@@ -329,6 +385,8 @@ export default function LeadDetailsPage() {
               justifyContent: "space-between",
               alignItems: "center",
               marginBottom: "25px",
+              gap: "15px",
+              flexWrap: "wrap",
             }}
           >
             <div>
@@ -409,12 +467,12 @@ export default function LeadDetailsPage() {
 
               <p>
                 <strong>Source:</strong>{" "}
-                {lead.source}
+                {lead.source || "-"}
               </p>
 
               <p>
                 <strong>Status:</strong>{" "}
-                {lead.status}
+                {lead.status || "-"}
               </p>
 
               <p>
@@ -476,31 +534,25 @@ export default function LeadDetailsPage() {
                     Select Sales User
                   </option>
 
-                  {salesUsers.map(
-                    (user) => (
-                      <option
-                        key={user._id}
-                        value={user._id}
-                      >
-                        {user.name} (
-                        {user.email})
-                      </option>
-                    )
-                  )}
+                  {salesUsers.map((user) => (
+                    <option
+                      key={user._id}
+                      value={user._id}
+                    >
+                      {user.name} (
+                      {user.email})
+                    </option>
+                  ))}
                 </select>
 
                 <button
                   onClick={
                     handleAssignLead
                   }
-                  disabled={
-                    assignLoading
-                  }
+                  disabled={assignLoading}
                   style={{
-                    padding:
-                      "10px 18px",
-                    background:
-                      "#2563eb",
+                    padding: "10px 18px",
+                    background: "#2563eb",
                     color: "white",
                     border: "none",
                     borderRadius: "6px",
@@ -537,14 +589,11 @@ export default function LeadDetailsPage() {
             {/* Add Activity */}
 
             <form
-              onSubmit={
-                handleAddActivity
-              }
+              onSubmit={handleAddActivity}
               style={{
                 marginTop: "20px",
                 padding: "20px",
-                background:
-                  "#f8fafc",
+                background: "#f8fafc",
                 borderRadius: "8px",
               }}
             >
@@ -558,6 +607,8 @@ export default function LeadDetailsPage() {
                   flexWrap: "wrap",
                 }}
               >
+                {/* Activity Type */}
+
                 <select
                   value={activityType}
                   onChange={(e) =>
@@ -589,12 +640,12 @@ export default function LeadDetailsPage() {
                   </option>
                 </select>
 
+                {/* Description */}
+
                 <input
                   type="text"
                   placeholder="Enter activity description..."
-                  value={
-                    activityDescription
-                  }
+                  value={activityDescription}
                   onChange={(e) =>
                     setActivityDescription(
                       e.target.value
@@ -602,8 +653,7 @@ export default function LeadDetailsPage() {
                   }
                   style={{
                     flex: 1,
-                    minWidth:
-                      "250px",
+                    minWidth: "250px",
                     padding: "10px",
                     border:
                       "1px solid #d1d5db",
@@ -611,16 +661,14 @@ export default function LeadDetailsPage() {
                   }}
                 />
 
+                {/* Add Button */}
+
                 <button
                   type="submit"
-                  disabled={
-                    activityLoading
-                  }
+                  disabled={activityLoading}
                   style={{
-                    padding:
-                      "10px 18px",
-                    background:
-                      "#2563eb",
+                    padding: "10px 18px",
+                    background: "#2563eb",
                     color: "white",
                     border: "none",
                     borderRadius: "6px",
@@ -637,13 +685,32 @@ export default function LeadDetailsPage() {
             {/* Activity List */}
 
             {activities.length === 0 ? (
-              <p
+              <div
                 style={{
                   marginTop: "20px",
+                  padding: "20px",
+                  textAlign: "center",
+                  background: "#f9fafb",
+                  borderRadius: "8px",
                 }}
               >
-                No activities yet.
-              </p>
+                <p
+                  style={{
+                    margin: 0,
+                  }}
+                >
+                  No activities yet.
+                </p>
+
+                <small
+                  style={{
+                    color: "#6b7280",
+                  }}
+                >
+                  Add a note, call, email,
+                  or meeting above.
+                </small>
+              </div>
             ) : (
               <div
                 style={{
@@ -655,36 +722,69 @@ export default function LeadDetailsPage() {
                     <div
                       key={activity._id}
                       style={{
-                        padding:
-                          "15px 0",
-                        borderBottom:
+                        padding: "16px",
+                        marginBottom: "12px",
+                        background: "#f9fafb",
+                        border:
                           "1px solid #e5e7eb",
+                        borderRadius: "8px",
                       }}
                     >
-                      <strong>
-                        {activity.type.toUpperCase()}
-                      </strong>
+                      <div
+                        style={{
+                          display: "flex",
+                          justifyContent:
+                            "space-between",
+                          alignItems:
+                            "center",
+                          gap: "10px",
+                          flexWrap:
+                            "wrap",
+                        }}
+                      >
+                        <strong
+                          style={{
+                            textTransform:
+                              "uppercase",
+                          }}
+                        >
+                          {activity.type}
+                        </strong>
+
+                        <small
+                          style={{
+                            color:
+                              "#6b7280",
+                          }}
+                        >
+                          {activity.createdAt
+                            ? new Date(
+                                activity.createdAt
+                              ).toLocaleString()
+                            : "-"}
+                        </small>
+                      </div>
 
                       <p
                         style={{
-                          margin:
-                            "8px 0",
+                          margin: "10px 0",
                         }}
                       >
-                        {
-                          activity.description
-                        }
+                        {activity.description}
                       </p>
 
-                      <small>
-                        By{" "}
-                        {activity.user
-                          ?.name ||
-                          "Unknown"}{" "}
-                        •{" "}
-                        {new Date(
-                          activity.createdAt
-                        ).toLocaleString()}
+                      <small
+                        style={{
+                          color:
+                            "#6b7280",
+                        }}
+                      >
+                        Added by{" "}
+                        <strong>
+                          {activity.user
+                            ?.name ||
+                            "Unknown"}
+                        </strong>
                       </small>
                     </div>
                   )
