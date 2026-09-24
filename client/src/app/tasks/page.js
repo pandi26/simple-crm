@@ -322,8 +322,21 @@ export default function TasksPage() {
                     <tr key={task._id}>
 
                       <td style={{ padding: "15px" }}>
-                        {task.title}
-                      </td>
+  <button
+    onClick={() =>
+      router.push(`/tasks/${task._id}`)
+    }
+    style={{
+      background: "none",
+      border: "none",
+      padding: 0,
+      cursor: "pointer",
+      fontWeight: "600",
+    }}
+  >
+    {task.title}
+  </button>
+</td>
 
                       <td style={{ padding: "15px" }}>
                         {task.lead?.name || "-"}
