@@ -7,181 +7,158 @@ import axios from "axios";
 import Navbar from "../components/Navbar";
 import Sidebar from "../components/Sidebar";
 
+const API_URL = "http://localhost:5000/api";
+
+const initialStats = {
+  customers: 0,
+  leads: 0,
+  newLeads: 0,
+  convertedLeads: 0,
+  pendingTasks: 0,
+  completedTasks: 0,
+};
+
 export default function DashboardPage() {
   const router = useRouter();
 
   const [user, setUser] = useState(null);
-
-  const [stats, setStats] = useState({
-    customers: 0,
-    leads: 0,
-    newLeads: 0,
-    convertedLeads: 0,
-    pendingTasks: 0,
-    completedTasks: 0,
-  });
-
+  const [stats, setStats] = useState(initialStats);
   const [recentLeads, setRecentLeads] = useState([]);
-
   const [loading, setLoading] = useState(true);
-  const [statsLoading, setStatsLoading] =
-    useState(true);
+  const [statsLoading, setStatsLoading] = useState(true);
 
-  // =========================
-  // Fetch Profile
-  // =========================
+  useEffect(() => {
+    const loadDashboard = async () => {
+      const token = localStorage.getItem("token");
 
-  const getProfile = async () => {
-    const token = localStorage.getItem("token");
+      if (!token) {
+        router.replace("/login");
+        return;
+      }
 
-    if (!token) {
-      router.replace("/login");
-      return null;
-    }
-
-    try {
-      const response = await axios.get(
-        "http://localhost:5000/api/auth/profile",
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }
-      );
-
-      setUser(response.data.user);
-
-      return token;
-    } catch (error) {
-      console.error(
-        "Profile Error:",
-        error
-      );
-
-      localStorage.removeItem("token");
-      router.replace("/login");
-
-      return null;
-    }
-  };
-
-  // =========================
-  // Fetch Dashboard Data
-  // =========================
-
-  const getDashboardData = async (token) => {
-    try {
       const config = {
         headers: {
           Authorization: `Bearer ${token}`,
         },
       };
 
-      const [
-        customersResponse,
-        leadsResponse,
-        tasksResponse,
-      ] = await Promise.all([
-        axios.get(
-          "http://localhost:5000/api/customers",
+      try {
+        // --------------------------------
+        // Get logged-in user
+        // --------------------------------
+        const profileResponse = await axios.get(
+          `${API_URL}/auth/profile`,
           config
-        ),
+        );
 
-        axios.get(
-          "http://localhost:5000/api/leads",
-          config
-        ),
+        const currentUser = profileResponse.data.user;
 
-        axios.get(
-          "http://localhost:5000/api/tasks",
-          config
-        ),
-      ]);
+        setUser(currentUser);
 
-      const customers =
-        customersResponse.data.customers || [];
+        const role = currentUser.role;
 
-      const leads =
-        leadsResponse.data.leads || [];
+        // --------------------------------
+        // Dashboard data
+        // --------------------------------
+        let customers = [];
+        let leads = [];
+        let tasks = [];
 
-      const tasks =
-        tasksResponse.data.tasks || [];
+        // Admin can access everything
+        if (role === "admin") {
+          const [customersResponse, leadsResponse, tasksResponse] =
+            await Promise.all([
+              axios.get(`${API_URL}/customers`, config),
+              axios.get(`${API_URL}/leads`, config),
+              axios.get(`${API_URL}/tasks`, config),
+            ]);
 
-      // Lead statistics
+          customers = customersResponse.data.customers || [];
+          leads = leadsResponse.data.leads || [];
+          tasks = tasksResponse.data.tasks || [];
+        }
 
-      const newLeads = leads.filter(
-        (lead) => lead.status === "new"
-      ).length;
+        // Sales can access leads and tasks
+        else if (role === "sales") {
+          const [leadsResponse, tasksResponse] =
+            await Promise.all([
+              axios.get(`${API_URL}/leads`, config),
+              axios.get(`${API_URL}/tasks`, config),
+            ]);
 
-      const convertedLeads = leads.filter(
-        (lead) =>
-          lead.status === "converted"
-      ).length;
+          leads = leadsResponse.data.leads || [];
+          tasks = tasksResponse.data.tasks || [];
+        }
 
-      // Task statistics
+        // Normal users don't have access
+        // to customers, leads or tasks
+        else {
+          customers = [];
+          leads = [];
+          tasks = [];
+        }
 
-      const pendingTasks = tasks.filter(
-        (task) =>
-          task.status === "pending" ||
-          task.status === "in_progress"
-      ).length;
+        // --------------------------------
+        // Calculate statistics
+        // --------------------------------
+        const newLeads = leads.filter(
+          (lead) => lead.status === "new"
+        ).length;
 
-      const completedTasks = tasks.filter(
-        (task) =>
-          task.status === "completed"
-      ).length;
+        const convertedLeads = leads.filter(
+          (lead) => lead.status === "converted"
+        ).length;
 
-      setStats({
-        customers: customers.length,
-        leads: leads.length,
-        newLeads,
-        convertedLeads,
-        pendingTasks,
-        completedTasks,
-      });
+        const pendingTasks = tasks.filter(
+          (task) =>
+            task.status === "pending" ||
+            task.status === "in_progress"
+        ).length;
 
-      // Show latest 5 leads
+        const completedTasks = tasks.filter(
+          (task) => task.status === "completed"
+        ).length;
 
-      const sortedLeads = [...leads]
-        .sort(
-          (a, b) =>
-            new Date(b.createdAt) -
-            new Date(a.createdAt)
-        )
-        .slice(0, 5);
+        setStats({
+          customers: customers.length,
+          leads: leads.length,
+          newLeads,
+          convertedLeads,
+          pendingTasks,
+          completedTasks,
+        });
 
-      setRecentLeads(sortedLeads);
-    } catch (error) {
-      console.error(
-        "Dashboard Data Error:",
-        error
-      );
-    } finally {
-      setStatsLoading(false);
-    }
-  };
+        // --------------------------------
+        // Recent leads
+        // --------------------------------
+        const sortedLeads = [...leads]
+          .sort(
+            (a, b) =>
+              new Date(b.createdAt) -
+              new Date(a.createdAt)
+          )
+          .slice(0, 5);
 
-  // =========================
-  // Load Dashboard
-  // =========================
+        setRecentLeads(sortedLeads);
+      } catch (error) {
+        console.error("Dashboard Error:", error);
 
-  useEffect(() => {
-    const loadDashboard = async () => {
-      const token = await getProfile();
-
-      if (token) {
-        await getDashboardData(token);
+        if (error.response?.status === 401) {
+          localStorage.removeItem("token");
+          router.replace("/login");
+        }
+      } finally {
+        setStatsLoading(false);
+        setLoading(false);
       }
-
-      setLoading(false);
     };
 
     loadDashboard();
   }, [router]);
 
-  // =========================
+  // --------------------------------
   // Loading
-  // =========================
+  // --------------------------------
 
   if (loading) {
     return (
@@ -191,9 +168,10 @@ export default function DashboardPage() {
     );
   }
 
-  // =========================
-  // UI
-  // =========================
+  const isAdmin = user?.role === "admin";
+  const isSales =
+    user?.role === "admin" ||
+    user?.role === "sales";
 
   return (
     <div className="crm-layout">
@@ -203,27 +181,19 @@ export default function DashboardPage() {
         <Navbar />
 
         <main className="dashboard-content">
-
           {/* Welcome */}
-
           <div className="welcome-section">
             <h1>Dashboard</h1>
 
             {user && (
               <p>
                 Welcome back,{" "}
-                <strong>
-                  {user.name}
-                </strong>{" "}
-                👋
+                <strong>{user.name}</strong> 👋
               </p>
             )}
           </div>
 
-          {/* =========================
-              Statistics
-          ========================= */}
-
+          {/* Statistics */}
           <div
             style={{
               display: "grid",
@@ -233,359 +203,295 @@ export default function DashboardPage() {
               marginBottom: "30px",
             }}
           >
+            {/* Customers - Admin only */}
+            {isAdmin && (
+              <div
+                className="dashboard-card"
+                onClick={() =>
+                  router.push("/customers")
+                }
+                style={{ cursor: "pointer" }}
+              >
+                <div className="card-icon">👥</div>
 
-            {/* Customers */}
+                <h2>
+                  {statsLoading
+                    ? "..."
+                    : stats.customers}
+                </h2>
 
-            <div
-              className="dashboard-card"
-              onClick={() =>
-                router.push("/customers")
-              }
-              style={{
-                cursor: "pointer",
-              }}
-            >
-              <div className="card-icon">
-                👥
+                <p>Total Customers</p>
               </div>
+            )}
 
-              <h2>
-                {statsLoading
-                  ? "..."
-                  : stats.customers}
-              </h2>
+            {/* Total Leads */}
+            {isSales && (
+              <div
+                className="dashboard-card"
+                onClick={() =>
+                  router.push("/leads")
+                }
+                style={{ cursor: "pointer" }}
+              >
+                <div className="card-icon">🎯</div>
 
-              <p>Total Customers</p>
-            </div>
+                <h2>
+                  {statsLoading
+                    ? "..."
+                    : stats.leads}
+                </h2>
 
-            {/* Leads */}
-
-            <div
-              className="dashboard-card"
-              onClick={() =>
-                router.push("/leads")
-              }
-              style={{
-                cursor: "pointer",
-              }}
-            >
-              <div className="card-icon">
-                🎯
+                <p>Total Leads</p>
               </div>
-
-              <h2>
-                {statsLoading
-                  ? "..."
-                  : stats.leads}
-              </h2>
-
-              <p>Total Leads</p>
-            </div>
+            )}
 
             {/* New Leads */}
+            {isSales && (
+              <div
+                className="dashboard-card"
+                onClick={() =>
+                  router.push("/leads")
+                }
+                style={{ cursor: "pointer" }}
+              >
+                <div className="card-icon">🆕</div>
 
-            <div
-              className="dashboard-card"
-              onClick={() =>
-                router.push("/leads")
-              }
-              style={{
-                cursor: "pointer",
-              }}
-            >
-              <div className="card-icon">
-                🆕
+                <h2>
+                  {statsLoading
+                    ? "..."
+                    : stats.newLeads}
+                </h2>
+
+                <p>New Leads</p>
               </div>
+            )}
 
-              <h2>
-                {statsLoading
-                  ? "..."
-                  : stats.newLeads}
-              </h2>
+            {/* Converted Leads */}
+            {isSales && (
+              <div
+                className="dashboard-card"
+                onClick={() =>
+                  router.push("/leads")
+                }
+                style={{ cursor: "pointer" }}
+              >
+                <div className="card-icon">🎉</div>
 
-              <p>New Leads</p>
-            </div>
+                <h2>
+                  {statsLoading
+                    ? "..."
+                    : stats.convertedLeads}
+                </h2>
 
-            {/* Converted */}
-
-            <div
-              className="dashboard-card"
-              onClick={() =>
-                router.push("/leads")
-              }
-              style={{
-                cursor: "pointer",
-              }}
-            >
-              <div className="card-icon">
-                🎉
+                <p>Converted Leads</p>
               </div>
-
-              <h2>
-                {statsLoading
-                  ? "..."
-                  : stats.convertedLeads}
-              </h2>
-
-              <p>Converted Leads</p>
-            </div>
+            )}
 
             {/* Pending Tasks */}
+            {isSales && (
+              <div
+                className="dashboard-card"
+                onClick={() =>
+                  router.push("/tasks")
+                }
+                style={{ cursor: "pointer" }}
+              >
+                <div className="card-icon">⏳</div>
 
-            <div
-              className="dashboard-card"
-              onClick={() =>
-                router.push("/tasks")
-              }
-              style={{
-                cursor: "pointer",
-              }}
-            >
-              <div className="card-icon">
-                ⏳
+                <h2>
+                  {statsLoading
+                    ? "..."
+                    : stats.pendingTasks}
+                </h2>
+
+                <p>Pending Tasks</p>
               </div>
-
-              <h2>
-                {statsLoading
-                  ? "..."
-                  : stats.pendingTasks}
-              </h2>
-
-              <p>Pending Tasks</p>
-            </div>
+            )}
 
             {/* Completed Tasks */}
+            {isSales && (
+              <div
+                className="dashboard-card"
+                onClick={() =>
+                  router.push("/tasks")
+                }
+                style={{ cursor: "pointer" }}
+              >
+                <div className="card-icon">✅</div>
 
-            <div
-              className="dashboard-card"
-              onClick={() =>
-                router.push("/tasks")
-              }
-              style={{
-                cursor: "pointer",
-              }}
-            >
-              <div className="card-icon">
-                ✅
+                <h2>
+                  {statsLoading
+                    ? "..."
+                    : stats.completedTasks}
+                </h2>
+
+                <p>Completed Tasks</p>
               </div>
-
-              <h2>
-                {statsLoading
-                  ? "..."
-                  : stats.completedTasks}
-              </h2>
-
-              <p>Completed Tasks</p>
-            </div>
-
+            )}
           </div>
 
-          {/* =========================
-              Quick Navigation
-          ========================= */}
-
-          <h2
-            style={{
-              marginBottom: "20px",
-            }}
-          >
+          {/* Quick Access */}
+          <h2 style={{ marginBottom: "20px" }}>
             Quick Access
           </h2>
 
           <div className="dashboard-grid">
+            {/* Customers */}
+            {isAdmin && (
+              <div className="dashboard-card">
+                <div className="card-icon">👥</div>
 
-            <div className="dashboard-card">
-              <div className="card-icon">
-                👥
+                <h2>Customers</h2>
+
+                <p>
+                  Manage your customers and
+                  customer information.
+                </p>
+
+                <button
+                  onClick={() =>
+                    router.push("/customers")
+                  }
+                >
+                  View Customers
+                </button>
               </div>
+            )}
 
-              <h2>Customers</h2>
+            {/* Leads */}
+            {isSales && (
+              <div className="dashboard-card">
+                <div className="card-icon">🎯</div>
 
-              <p>
-                Manage your customers and
-                customer information.
-              </p>
+                <h2>Leads</h2>
 
-              <button
-                onClick={() =>
-                  router.push(
-                    "/customers"
-                  )
-                }
-              >
-                View Customers
-              </button>
-            </div>
+                <p>
+                  Track and manage your sales
+                  leads.
+                </p>
 
-            <div className="dashboard-card">
-              <div className="card-icon">
-                🎯
+                <button
+                  onClick={() =>
+                    router.push("/leads")
+                  }
+                >
+                  View Leads
+                </button>
               </div>
+            )}
 
-              <h2>Leads</h2>
+            {/* Tasks */}
+            {isSales && (
+              <div className="dashboard-card">
+                <div className="card-icon">✅</div>
 
-              <p>
-                Track and manage your sales
-                leads.
-              </p>
+                <h2>Tasks</h2>
 
-              <button
-                onClick={() =>
-                  router.push("/leads")
-                }
-              >
-                View Leads
-              </button>
-            </div>
+                <p>
+                  Manage tasks and follow-ups.
+                </p>
 
-            <div className="dashboard-card">
-              <div className="card-icon">
-                ✅
+                <button
+                  onClick={() =>
+                    router.push("/tasks")
+                  }
+                >
+                  View Tasks
+                </button>
               </div>
+            )}
 
-              <h2>Tasks</h2>
+            {/* Users */}
+            {isAdmin && (
+              <div className="dashboard-card">
+                <div className="card-icon">👤</div>
 
-              <p>
-                Manage tasks and follow-ups.
-              </p>
+                <h2>Users</h2>
 
-              <button
-                onClick={() =>
-                  router.push("/tasks")
-                }
-              >
-                View Tasks
-              </button>
-            </div>
+                <p>
+                  Manage CRM users and roles.
+                </p>
 
-            <div className="dashboard-card">
-              <div className="card-icon">
-                👤
+                <button
+                  onClick={() =>
+                    router.push("/users")
+                  }
+                >
+                  View Users
+                </button>
               </div>
-
-              <h2>Users</h2>
-
-              <p>
-                Manage CRM users and roles.
-              </p>
-
-              <button
-                onClick={() =>
-                  router.push("/users")
-                }
-              >
-                View Users
-              </button>
-            </div>
-
+            )}
           </div>
 
-          {/* =========================
-              Recent Leads
-          ========================= */}
-
-          <div
-            className="dashboard-card"
-            style={{
-              marginTop: "30px",
-            }}
-          >
+          {/* Recent Leads */}
+          {isSales && (
             <div
-              style={{
-                display: "flex",
-                justifyContent:
-                  "space-between",
-                alignItems: "center",
-                marginBottom: "20px",
-              }}
+              className="dashboard-card"
+              style={{ marginTop: "30px" }}
             >
-              <h2>
-                Recent Leads
-              </h2>
-
-              <button
-                onClick={() =>
-                  router.push("/leads")
-                }
-              >
-                View All
-              </button>
-            </div>
-
-            {statsLoading ? (
-              <p>
-                Loading recent leads...
-              </p>
-            ) : recentLeads.length === 0 ? (
-              <p>
-                No leads found.
-              </p>
-            ) : (
               <div
                 style={{
-                  overflowX: "auto",
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  marginBottom: "20px",
                 }}
               >
-                <table
-                  style={{
-                    width: "100%",
-                    borderCollapse:
-                      "collapse",
-                  }}
+                <h2>Recent Leads</h2>
+
+                <button
+                  onClick={() =>
+                    router.push("/leads")
+                  }
                 >
-                  <thead>
-                    <tr
-                      style={{
-                        textAlign: "left",
-                        borderBottom:
-                          "1px solid #e5e7eb",
-                      }}
-                    >
-                      <th
+                  View All
+                </button>
+              </div>
+
+              {statsLoading ? (
+                <p>Loading recent leads...</p>
+              ) : recentLeads.length === 0 ? (
+                <p>No leads found.</p>
+              ) : (
+                <div style={{ overflowX: "auto" }}>
+                  <table
+                    style={{
+                      width: "100%",
+                      borderCollapse: "collapse",
+                    }}
+                  >
+                    <thead>
+                      <tr
                         style={{
-                          padding: "12px",
+                          textAlign: "left",
+                          borderBottom:
+                            "1px solid #e5e7eb",
                         }}
                       >
-                        Name
-                      </th>
+                        <th style={{ padding: "12px" }}>
+                          Name
+                        </th>
 
-                      <th
-                        style={{
-                          padding: "12px",
-                        }}
-                      >
-                        Company
-                      </th>
+                        <th style={{ padding: "12px" }}>
+                          Company
+                        </th>
 
-                      <th
-                        style={{
-                          padding: "12px",
-                        }}
-                      >
-                        Status
-                      </th>
+                        <th style={{ padding: "12px" }}>
+                          Status
+                        </th>
 
-                      <th
-                        style={{
-                          padding: "12px",
-                        }}
-                      >
-                        Value
-                      </th>
+                        <th style={{ padding: "12px" }}>
+                          Value
+                        </th>
 
-                      <th
-                        style={{
-                          padding: "12px",
-                        }}
-                      >
-                        Action
-                      </th>
-                    </tr>
-                  </thead>
+                        <th style={{ padding: "12px" }}>
+                          Action
+                        </th>
+                      </tr>
+                    </thead>
 
-                  <tbody>
-                    {recentLeads.map(
-                      (lead) => (
+                    <tbody>
+                      {recentLeads.map((lead) => (
                         <tr
                           key={lead._id}
                           style={{
@@ -593,51 +499,23 @@ export default function DashboardPage() {
                               "1px solid #f1f5f9",
                           }}
                         >
-                          <td
-                            style={{
-                              padding:
-                                "12px",
-                            }}
-                          >
+                          <td style={{ padding: "12px" }}>
                             {lead.name}
                           </td>
 
-                          <td
-                            style={{
-                              padding:
-                                "12px",
-                            }}
-                          >
-                            {lead.company ||
-                              "-"}
+                          <td style={{ padding: "12px" }}>
+                            {lead.company || "-"}
                           </td>
 
-                          <td
-                            style={{
-                              padding:
-                                "12px",
-                            }}
-                          >
+                          <td style={{ padding: "12px" }}>
                             {lead.status}
                           </td>
 
-                          <td
-                            style={{
-                              padding:
-                                "12px",
-                            }}
-                          >
-                            ₹
-                            {lead.value ||
-                              0}
+                          <td style={{ padding: "12px" }}>
+                            ₹{lead.value || 0}
                           </td>
 
-                          <td
-                            style={{
-                              padding:
-                                "12px",
-                            }}
-                          >
+                          <td style={{ padding: "12px" }}>
                             <button
                               onClick={() =>
                                 router.push(
@@ -649,14 +527,13 @@ export default function DashboardPage() {
                             </button>
                           </td>
                         </tr>
-                      )
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
         </main>
       </div>
     </div>
