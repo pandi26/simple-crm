@@ -1,53 +1,80 @@
-const Customer=require("../models/customer");
+const Customer = require("../models/customer");
+const { redisClient } = require("../config/redis");
 
-//create customer
+const CUSTOMER_CACHE_KEY = "customers:all";
+const CACHE_TTL = 60; // 60 seconds
 
-const createCustomer = async (req, res)=>{
-    try{
-const {name, email, phone, company, status}=req.body;
+// Create Customer
+const createCustomer = async (req, res) => {
+  try {
+    const { name, email, phone, company, status } = req.body;
 
-if(!name||!email||!phone){
-    return res.json({
-        message:"name, email, phone are required",
-    });
-}
-const customer =await Customer.create({
-    name, 
-    email,
-    phone,
-    company,
-    status,
-    createdBy: req.user._id,
-
-});
-
-return res.status(201).json({
-    message:"customer created successfully",
-    customer,
-});
-
+    if (!name || !email || !phone) {
+      return res.status(400).json({
+        message: "name, email, phone are required",
+      });
     }
-   catch (error){
-    console.error("customer error",error.message);
+
+    const customer = await Customer.create({
+      name,
+      email,
+      phone,
+      company,
+      status,
+      createdBy: req.user._id,
+    });
+
+    // Clear customers cache
+    await redisClient.del(CUSTOMER_CACHE_KEY);
+
+    return res.status(201).json({
+      message: "Customer created successfully",
+      customer,
+    });
+  } catch (error) {
+    console.error("Create Customer Error:", error.message);
 
     return res.status(500).json({
-        message:error.message,
+      message: error.message,
     });
-
-   }
-
+  }
 };
 
 // Get All Customers
 const getCustomers = async (req, res) => {
   try {
+    // Check Redis
+    const cachedCustomers = await redisClient.get(CUSTOMER_CACHE_KEY);
+
+    if (cachedCustomers) {
+      console.log("Customers Cache HIT");
+
+      const customers = JSON.parse(cachedCustomers);
+
+      return res.status(200).json({
+        count: customers.length,
+        customers,
+        source: "redis",
+      });
+    }
+
+    console.log("Customers Cache MISS");
+
+    // Get from MongoDB
     const customers = await Customer.find();
+
+    // Store in Redis
+    await redisClient.setEx(
+      CUSTOMER_CACHE_KEY,
+      CACHE_TTL,
+      JSON.stringify(customers)
+    );
 
     return res.status(200).json({
       count: customers.length,
       customers,
+      source: "mongodb",
     });
-
   } catch (error) {
     console.error("Get Customers Error:", error.message);
 
@@ -57,27 +84,30 @@ const getCustomers = async (req, res) => {
   }
 };
 
-const getCustomerById= async (req, res)=>{
-    try{
-            const customer =await Customer.findById(req.param.id);
+// Get Customer By ID
+const getCustomerById = async (req, res) => {
+  try {
+    const customer = await Customer.findById(req.params.id);
 
-            if(!customer){
-                return res.status(404).json({
-                    message:"Customer not found",
-                });
-            }
-            return res.status(200).json({
-                customer,
-            });
+    if (!customer) {
+      return res.status(404).json({
+        message: "Customer not found",
+      });
     }
-    catch(error){
-        return res.json({
-            message:error.message,
-        });
-    }
+
+    return res.status(200).json({
+      customer,
+    });
+  } catch (error) {
+    console.error("Get Customer Error:", error.message);
+
+    return res.status(500).json({
+      message: error.message,
+    });
+  }
 };
 
-
+// Update Customer
 const updateCustomer = async (req, res) => {
   try {
     const customer = await Customer.findById(req.params.id);
@@ -104,12 +134,15 @@ const updateCustomer = async (req, res) => {
 
     await customer.save();
 
+    // Clear customers cache
+    await redisClient.del(CUSTOMER_CACHE_KEY);
+
     return res.status(200).json({
       message: "Customer updated successfully",
       customer,
     });
   } catch (error) {
-    console.error("Update Customer Error:", error);
+    console.error("Update Customer Error:", error.message);
 
     return res.status(500).json({
       message: error.message,
@@ -130,10 +163,12 @@ const deleteCustomer = async (req, res) => {
       });
     }
 
+    // Clear customers cache
+    await redisClient.del(CUSTOMER_CACHE_KEY);
+
     return res.status(200).json({
       message: "Customer deleted successfully",
     });
-
   } catch (error) {
     console.error("Delete Customer Error:", error.message);
 
@@ -143,4 +178,10 @@ const deleteCustomer = async (req, res) => {
   }
 };
 
-module.exports={createCustomer,getCustomers,getCustomerById,updateCustomer,deleteCustomer,};
+module.exports = {
+  createCustomer,
+  getCustomers,
+  getCustomerById,
+  updateCustomer,
+  deleteCustomer,
+};

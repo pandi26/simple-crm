@@ -1,5 +1,30 @@
 const Lead = require("../models/Lead");
 const LeadActivity = require("../models/LeadActivity");
+const { redisClient } = require("../config/redis");
+
+const CACHE_TTL = 60;
+
+// Create a unique cache key for each user + query
+const getLeadCacheKey = (userId, query) => {
+  const {
+    search = "",
+    status = "",
+    source = "",
+    page = 1,
+    limit = 10,
+  } = query;
+
+  return `leads:${userId}:${search}:${status}:${source}:${page}:${limit}`;
+};
+
+// Clear all cached lead lists for a user
+const clearLeadCache = async (userId) => {
+  const keys = await redisClient.keys(`leads:${userId}:*`);
+
+  if (keys.length > 0) {
+    await redisClient.del(keys);
+  }
+};
 
 // Create Lead
 const createLead = async (req, res) => {
@@ -15,14 +40,12 @@ const createLead = async (req, res) => {
       assignedTo,
     } = req.body;
 
-    // Check required fields
     if (!name || !email || !phone) {
       return res.status(400).json({
         message: "Name, email and phone are required",
       });
     }
 
-    // Create lead
     const lead = await Lead.create({
       name,
       email,
@@ -35,11 +58,18 @@ const createLead = async (req, res) => {
       createdBy: req.user._id,
     });
 
+    // Clear cache for creator
+    await clearLeadCache(req.user._id.toString());
+
+    // If assigned to another user, clear their cache too
+    if (assignedTo) {
+      await clearLeadCache(assignedTo.toString());
+    }
+
     return res.status(201).json({
       message: "Lead created successfully",
       lead,
     });
-
   } catch (error) {
     console.error("Create Lead Error:", error.message);
 
@@ -53,22 +83,47 @@ const createLead = async (req, res) => {
 const getLeads = async (req, res) => {
   try {
     const {
-      search,
-      status,
-      source,
+      search = "",
+      status = "",
+      source = "",
       page = 1,
       limit = 10,
     } = req.query;
 
-    // Build filter
+    const pageNumber = Number(page);
+    const limitNumber = Number(limit);
+
+    const cacheKey = getLeadCacheKey(req.user._id.toString(), {
+      search,
+      status,
+      source,
+      page: pageNumber,
+      limit: limitNumber,
+    });
+
+    // Check Redis first
+    const cachedLeads = await redisClient.get(cacheKey);
+
+    if (cachedLeads) {
+      console.log("Leads Cache HIT");
+
+      return res.status(200).json({
+        ...JSON.parse(cachedLeads),
+        source: "redis",
+      });
+    }
+
+    console.log("Leads Cache MISS");
+
+    // Build MongoDB filter
     const filter = {};
 
-    // Sales users can only see their assigned leads
+    // Sales users can only see assigned leads
     if (req.user.role === "sales") {
       filter.assignedTo = req.user._id;
     }
 
-    // Search by name, email or company
+    // Search
     if (search) {
       filter.$or = [
         { name: { $regex: search, $options: "i" } },
@@ -77,19 +132,15 @@ const getLeads = async (req, res) => {
       ];
     }
 
-    // Filter by status
+    // Status filter
     if (status) {
       filter.status = status;
     }
 
-    // Filter by source
+    // Source filter
     if (source) {
       filter.source = source;
     }
-
-    // Pagination
-    const pageNumber = Number(page);
-    const limitNumber = Number(limit);
 
     const skip = (pageNumber - 1) * limitNumber;
 
@@ -102,14 +153,25 @@ const getLeads = async (req, res) => {
 
     const total = await Lead.countDocuments(filter);
 
-    return res.status(200).json({
+    const responseData = {
       count: leads.length,
       total,
       page: pageNumber,
       pages: Math.ceil(total / limitNumber),
       leads,
-    });
+    };
 
+    // Store in Redis
+    await redisClient.setEx(
+      cacheKey,
+      CACHE_TTL,
+      JSON.stringify(responseData)
+    );
+
+    return res.status(200).json({
+      ...responseData,
+      source: "mongodb",
+    });
   } catch (error) {
     console.error("Get Leads Error:", error.message);
 
@@ -136,7 +198,7 @@ const getLeadById = async (req, res) => {
       lead,
     });
   } catch (error) {
-    console.error("Get Lead By ID Error:", error);
+    console.error("Get Lead By ID Error:", error.message);
 
     return res.status(500).json({
       message: error.message,
@@ -144,10 +206,6 @@ const getLeadById = async (req, res) => {
   }
 };
 
-
-
-
-// Update Lead
 // Update Lead
 const updateLead = async (req, res) => {
   try {
@@ -159,7 +217,7 @@ const updateLead = async (req, res) => {
       });
     }
 
-    // Sales can update only their assigned leads
+    // Sales can update only assigned leads
     if (
       req.user.role === "sales" &&
       String(lead.assignedTo) !== String(req.user._id)
@@ -169,25 +227,21 @@ const updateLead = async (req, res) => {
       });
     }
 
-    // Sales cannot change assignment
-    if (
-      req.user.role === "sales" &&
-      req.body.assignedTo
-    ) {
+    // Sales cannot reassign
+    if (req.user.role === "sales" && req.body.assignedTo) {
       return res.status(403).json({
         message: "Sales users cannot reassign leads",
       });
     }
 
-    // Store old status
     const oldStatus = lead.status;
+    const oldAssignedTo = lead.assignedTo;
 
-    // Update lead
     Object.assign(lead, req.body);
 
     await lead.save();
 
-    // Check whether status changed
+    // Create activity if status changed
     if (req.body.status && req.body.status !== oldStatus) {
       await LeadActivity.create({
         lead: lead._id,
@@ -200,6 +254,19 @@ const updateLead = async (req, res) => {
     const updatedLead = await Lead.findById(lead._id)
       .populate("assignedTo", "name email role")
       .populate("createdBy", "name email");
+
+    // Clear cache for creator
+    await clearLeadCache(lead.createdBy.toString());
+
+    // Clear cache for previous assignee
+    if (oldAssignedTo) {
+      await clearLeadCache(oldAssignedTo.toString());
+    }
+
+    // Clear cache for new assignee
+    if (lead.assignedTo) {
+      await clearLeadCache(lead.assignedTo.toString());
+    }
 
     return res.status(200).json({
       message: "Lead updated successfully",
@@ -214,8 +281,6 @@ const updateLead = async (req, res) => {
   }
 };
 
-
-// Assign Lead to a User
 // Assign Lead
 const assignLead = async (req, res) => {
   try {
@@ -235,12 +300,12 @@ const assignLead = async (req, res) => {
       });
     }
 
-    // Save assigned user
+    const oldAssignedTo = lead.assignedTo;
+
     lead.assignedTo = assignedTo;
 
     await lead.save();
 
-    // Create automatic activity
     await LeadActivity.create({
       lead: lead._id,
       user: req.user._id,
@@ -251,6 +316,15 @@ const assignLead = async (req, res) => {
     const updatedLead = await Lead.findById(lead._id)
       .populate("assignedTo", "name email role")
       .populate("createdBy", "name email");
+
+    // Clear old and new user's caches
+    if (oldAssignedTo) {
+      await clearLeadCache(oldAssignedTo.toString());
+    }
+
+    await clearLeadCache(assignedTo.toString());
+
+    await clearLeadCache(req.user._id.toString());
 
     return res.status(200).json({
       message: "Lead assigned successfully",
@@ -276,10 +350,17 @@ const deleteLead = async (req, res) => {
       });
     }
 
+    // Clear creator cache
+    await clearLeadCache(lead.createdBy.toString());
+
+    // Clear assigned user's cache
+    if (lead.assignedTo) {
+      await clearLeadCache(lead.assignedTo.toString());
+    }
+
     return res.status(200).json({
       message: "Lead deleted successfully",
     });
-
   } catch (error) {
     console.error("Delete Lead Error:", error.message);
 
@@ -288,6 +369,7 @@ const deleteLead = async (req, res) => {
     });
   }
 };
+
 module.exports = {
   createLead,
   getLeads,
@@ -295,4 +377,4 @@ module.exports = {
   updateLead,
   deleteLead,
   assignLead,
-};
+};  
