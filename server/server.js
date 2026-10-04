@@ -11,6 +11,7 @@ const leadRoutes = require("./routes/leadRoutes");
 const leadActivityRoutes = require("./routes/leadActivityRoutes");
 const taskRoutes = require("./routes/taskRoutes");
 const userRoutes = require("./routes/userRoutes");
+const dashboardRoutes = require("./routes/dashboardRoutes");
 
 dotenv.config();
 
@@ -46,6 +47,8 @@ app.use("/api/leads", leadActivityRoutes);
 app.use("/api/tasks", taskRoutes);
 
 app.use("/api/users", userRoutes);
+
+app.use("/api/dashboard", dashboardRoutes);
 
 // =========================
 // Health Check
