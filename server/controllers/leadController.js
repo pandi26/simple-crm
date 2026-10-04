@@ -1,10 +1,18 @@
 const Lead = require("../models/Lead");
 const LeadActivity = require("../models/LeadActivity");
-const { redisClient } = require("../config/redis");
+
+const {
+  getCache,
+  setCache,
+  deleteCache,
+} = require("../utils/cache");
 
 const CACHE_TTL = 60;
 
-// Create a unique cache key for each user + query
+// ========================================
+// Cache Helpers
+// ========================================
+
 const getLeadCacheKey = (userId, query) => {
   const {
     search = "",
@@ -19,14 +27,28 @@ const getLeadCacheKey = (userId, query) => {
 
 // Clear all cached lead lists for a user
 const clearLeadCache = async (userId) => {
-  const keys = await redisClient.keys(`leads:${userId}:*`);
+  try {
+    const pattern = `leads:${userId}:*`;
 
-  if (keys.length > 0) {
-    await redisClient.del(keys);
+    // NOTE:
+    // KEYS is acceptable for development.
+    // Later we'll replace this with SCAN for production.
+    const { redisClient } = require("../config/redis");
+
+    const keys = await redisClient.keys(pattern);
+
+    if (keys.length > 0) {
+      await redisClient.del(keys);
+    }
+  } catch (error) {
+    console.error("Clear Lead Cache Error:", error.message);
   }
 };
 
+// ========================================
 // Create Lead
+// ========================================
+
 const createLead = async (req, res) => {
   try {
     const {
@@ -58,10 +80,10 @@ const createLead = async (req, res) => {
       createdBy: req.user._id,
     });
 
-    // Clear cache for creator
+    // Clear creator cache
     await clearLeadCache(req.user._id.toString());
 
-    // If assigned to another user, clear their cache too
+    // Clear assigned user's cache
     if (assignedTo) {
       await clearLeadCache(assignedTo.toString());
     }
@@ -74,12 +96,15 @@ const createLead = async (req, res) => {
     console.error("Create Lead Error:", error.message);
 
     return res.status(500).json({
-      message: error.message,
+      message: "Failed to create lead",
     });
   }
 };
 
+// ========================================
 // Get All Leads
+// ========================================
+
 const getLeads = async (req, res) => {
   try {
     const {
@@ -93,7 +118,21 @@ const getLeads = async (req, res) => {
     const pageNumber = Number(page);
     const limitNumber = Number(limit);
 
-    const cacheKey = getLeadCacheKey(req.user._id.toString(), {
+    // Prevent invalid pagination
+    if (
+      !Number.isInteger(pageNumber) ||
+      !Number.isInteger(limitNumber) ||
+      pageNumber < 1 ||
+      limitNumber < 1
+    ) {
+      return res.status(400).json({
+        message: "Invalid pagination values",
+      });
+    }
+
+    const userId = req.user._id.toString();
+
+    const cacheKey = getLeadCacheKey(userId, {
       search,
       status,
       source,
@@ -101,24 +140,30 @@ const getLeads = async (req, res) => {
       limit: limitNumber,
     });
 
-    // Check Redis first
-    const cachedLeads = await redisClient.get(cacheKey);
+    // ========================================
+    // Redis Cache
+    // ========================================
+
+    const cachedLeads = await getCache(cacheKey);
 
     if (cachedLeads) {
       console.log("Leads Cache HIT");
 
       return res.status(200).json({
-        ...JSON.parse(cachedLeads),
+        ...cachedLeads,
         source: "redis",
       });
     }
 
     console.log("Leads Cache MISS");
 
-    // Build MongoDB filter
+    // ========================================
+    // MongoDB Filter
+    // ========================================
+
     const filter = {};
 
-    // Sales users can only see assigned leads
+    // Sales users only see assigned leads
     if (req.user.role === "sales") {
       filter.assignedTo = req.user._id;
     }
@@ -126,32 +171,54 @@ const getLeads = async (req, res) => {
     // Search
     if (search) {
       filter.$or = [
-        { name: { $regex: search, $options: "i" } },
-        { email: { $regex: search, $options: "i" } },
-        { company: { $regex: search, $options: "i" } },
+        {
+          name: {
+            $regex: search,
+            $options: "i",
+          },
+        },
+        {
+          email: {
+            $regex: search,
+            $options: "i",
+          },
+        },
+        {
+          company: {
+            $regex: search,
+            $options: "i",
+          },
+        },
       ];
     }
 
-    // Status filter
+    // Status
     if (status) {
       filter.status = status;
     }
 
-    // Source filter
+    // Source
     if (source) {
       filter.source = source;
     }
 
+    // ========================================
+    // Pagination
+    // ========================================
+
     const skip = (pageNumber - 1) * limitNumber;
 
-    const leads = await Lead.find(filter)
-      .populate("assignedTo", "name email role")
-      .populate("createdBy", "name email")
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limitNumber);
+    const [leads, total] = await Promise.all([
+      Lead.find(filter)
+        .populate("assignedTo", "name email role")
+        .populate("createdBy", "name email")
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limitNumber)
+        .lean(),
 
-    const total = await Lead.countDocuments(filter);
+      Lead.countDocuments(filter),
+    ]);
 
     const responseData = {
       count: leads.length,
@@ -161,11 +228,14 @@ const getLeads = async (req, res) => {
       leads,
     };
 
-    // Store in Redis
-    await redisClient.setEx(
+    // ========================================
+    // Save to Redis
+    // ========================================
+
+    await setCache(
       cacheKey,
-      CACHE_TTL,
-      JSON.stringify(responseData)
+      responseData,
+      CACHE_TTL
     );
 
     return res.status(200).json({
@@ -176,12 +246,15 @@ const getLeads = async (req, res) => {
     console.error("Get Leads Error:", error.message);
 
     return res.status(500).json({
-      message: error.message,
+      message: "Failed to fetch leads",
     });
   }
 };
 
-// Get Single Lead
+// ========================================
+// Get Lead By ID
+// ========================================
+
 const getLeadById = async (req, res) => {
   try {
     const lead = await Lead.findById(req.params.id)
@@ -201,12 +274,15 @@ const getLeadById = async (req, res) => {
     console.error("Get Lead By ID Error:", error.message);
 
     return res.status(500).json({
-      message: error.message,
+      message: "Failed to fetch lead",
     });
   }
 };
 
+// ========================================
 // Update Lead
+// ========================================
+
 const updateLead = async (req, res) => {
   try {
     const lead = await Lead.findById(req.params.id);
@@ -227,8 +303,11 @@ const updateLead = async (req, res) => {
       });
     }
 
-    // Sales cannot reassign
-    if (req.user.role === "sales" && req.body.assignedTo) {
+    // Sales cannot reassign leads
+    if (
+      req.user.role === "sales" &&
+      req.body.assignedTo
+    ) {
       return res.status(403).json({
         message: "Sales users cannot reassign leads",
       });
@@ -241,8 +320,11 @@ const updateLead = async (req, res) => {
 
     await lead.save();
 
-    // Create activity if status changed
-    if (req.body.status && req.body.status !== oldStatus) {
+    // Create activity when status changes
+    if (
+      req.body.status &&
+      req.body.status !== oldStatus
+    ) {
       await LeadActivity.create({
         lead: lead._id,
         user: req.user._id,
@@ -255,17 +337,24 @@ const updateLead = async (req, res) => {
       .populate("assignedTo", "name email role")
       .populate("createdBy", "name email");
 
-    // Clear cache for creator
-    await clearLeadCache(lead.createdBy.toString());
+    // ========================================
+    // Clear Relevant Caches
+    // ========================================
 
-    // Clear cache for previous assignee
+    await clearLeadCache(
+      lead.createdBy.toString()
+    );
+
     if (oldAssignedTo) {
-      await clearLeadCache(oldAssignedTo.toString());
+      await clearLeadCache(
+        oldAssignedTo.toString()
+      );
     }
 
-    // Clear cache for new assignee
     if (lead.assignedTo) {
-      await clearLeadCache(lead.assignedTo.toString());
+      await clearLeadCache(
+        lead.assignedTo.toString()
+      );
     }
 
     return res.status(200).json({
@@ -276,12 +365,15 @@ const updateLead = async (req, res) => {
     console.error("Update Lead Error:", error.message);
 
     return res.status(500).json({
-      message: error.message,
+      message: "Failed to update lead",
     });
   }
 };
 
+// ========================================
 // Assign Lead
+// ========================================
+
 const assignLead = async (req, res) => {
   try {
     const { assignedTo } = req.body;
@@ -317,14 +409,22 @@ const assignLead = async (req, res) => {
       .populate("assignedTo", "name email role")
       .populate("createdBy", "name email");
 
-    // Clear old and new user's caches
+    // Clear old assignee cache
     if (oldAssignedTo) {
-      await clearLeadCache(oldAssignedTo.toString());
+      await clearLeadCache(
+        oldAssignedTo.toString()
+      );
     }
 
-    await clearLeadCache(assignedTo.toString());
+    // Clear new assignee cache
+    await clearLeadCache(
+      assignedTo.toString()
+    );
 
-    await clearLeadCache(req.user._id.toString());
+    // Clear current user's cache
+    await clearLeadCache(
+      req.user._id.toString()
+    );
 
     return res.status(200).json({
       message: "Lead assigned successfully",
@@ -334,15 +434,20 @@ const assignLead = async (req, res) => {
     console.error("Assign Lead Error:", error.message);
 
     return res.status(500).json({
-      message: error.message,
+      message: "Failed to assign lead",
     });
   }
 };
 
+// ========================================
 // Delete Lead
+// ========================================
+
 const deleteLead = async (req, res) => {
   try {
-    const lead = await Lead.findByIdAndDelete(req.params.id);
+    const lead = await Lead.findByIdAndDelete(
+      req.params.id
+    );
 
     if (!lead) {
       return res.status(404).json({
@@ -351,11 +456,17 @@ const deleteLead = async (req, res) => {
     }
 
     // Clear creator cache
-    await clearLeadCache(lead.createdBy.toString());
+    if (lead.createdBy) {
+      await clearLeadCache(
+        lead.createdBy.toString()
+      );
+    }
 
     // Clear assigned user's cache
     if (lead.assignedTo) {
-      await clearLeadCache(lead.assignedTo.toString());
+      await clearLeadCache(
+        lead.assignedTo.toString()
+      );
     }
 
     return res.status(200).json({
@@ -365,10 +476,14 @@ const deleteLead = async (req, res) => {
     console.error("Delete Lead Error:", error.message);
 
     return res.status(500).json({
-      message: error.message,
+      message: "Failed to delete lead",
     });
   }
 };
+
+// ========================================
+// Exports
+// ========================================
 
 module.exports = {
   createLead,
@@ -377,4 +492,4 @@ module.exports = {
   updateLead,
   deleteLead,
   assignLead,
-};  
+};
