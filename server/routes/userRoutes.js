@@ -8,13 +8,9 @@ const {
   deleteUser,
 } = require("../controllers/userController");
 
-const {
-  protect,
-} = require("../middleware/authMiddleware");
+const { protect } = require("../middleware/authMiddleware");
 
-const {
-  adminOnly,
-} = require("../middleware/roleMiddleware");
+const { authorize } = require("../middleware/roleMiddleware");
 
 const router = express.Router();
 
@@ -22,7 +18,7 @@ const router = express.Router();
 router.get(
   "/",
   protect,
-  adminOnly,
+  authorize("admin"),
   getUsers
 );
 
@@ -30,7 +26,7 @@ router.get(
 router.get(
   "/:id",
   protect,
-  adminOnly,
+  authorize("admin"),
   getUserById
 );
 
@@ -38,7 +34,7 @@ router.get(
 router.post(
   "/",
   protect,
-  adminOnly,
+  authorize("admin"),
   createUser
 );
 
@@ -46,7 +42,7 @@ router.post(
 router.put(
   "/:id",
   protect,
-  adminOnly,
+  authorize("admin"),
   updateUser
 );
 
@@ -54,7 +50,7 @@ router.put(
 router.delete(
   "/:id",
   protect,
-  adminOnly,
+  authorize("admin"),
   deleteUser
 );
 
