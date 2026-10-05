@@ -74,6 +74,7 @@ services:
       PORT: 5000
       MONGO_URI: mongodb://mongodb:27017/CRM
       REDIS_URL: redis://redis:6379
+      JWT_SECRET: crm_2026_f5b580f5de86c527deae9a2dcd52dbfa52e0440e26883d14cf00321982bd116f
     depends_on:
       - mongodb
       - redis
