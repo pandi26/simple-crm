@@ -9,10 +9,21 @@ const {
   assignLead,
 } = require("../controllers/leadController");
 
-const { protect } = require("../middleware/authMiddleware");
-const { authorize, adminOnly } = require("../middleware/roleMiddleware");
+const {
+  protect,
+} = require("../middleware/authMiddleware");
+
+const {
+  authorize,
+  adminOnly,
+} = require("../middleware/roleMiddleware");
 
 const router = express.Router();
+
+// =====================================================
+// CREATE LEAD
+// Admin + Sales
+// =====================================================
 
 router.post(
   "/",
@@ -21,12 +32,22 @@ router.post(
   createLead
 );
 
+// =====================================================
+// GET ALL LEADS
+// Admin + Sales
+// =====================================================
+
 router.get(
   "/",
   protect,
   authorize("admin", "sales"),
   getLeads
 );
+
+// =====================================================
+// GET SINGLE LEAD
+// Admin + Sales
+// =====================================================
 
 router.get(
   "/:id",
@@ -35,6 +56,11 @@ router.get(
   getLeadById
 );
 
+// =====================================================
+// UPDATE LEAD
+// Admin + Sales
+// =====================================================
+
 router.put(
   "/:id",
   protect,
@@ -42,12 +68,22 @@ router.put(
   updateLead
 );
 
+// =====================================================
+// ASSIGN / REASSIGN LEAD
+// Admin Only
+// =====================================================
+
 router.put(
   "/:id/assign",
   protect,
   adminOnly,
   assignLead
 );
+
+// =====================================================
+// DELETE LEAD
+// Admin Only
+// =====================================================
 
 router.delete(
   "/:id",

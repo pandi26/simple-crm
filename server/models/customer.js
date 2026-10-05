@@ -33,15 +33,19 @@
            enum:["user","Admin"],
            default:"user",
         },
-        createdBy:{
-            type:mongoose.Schema.Types.ObjectId,
-            ref:"User",
-            required:true,
+        createdBy: {
+  type: mongoose.Schema.Types.ObjectId,
+  ref: "User",
+  required: true,
+},
 
-        },
+assignedTo: {
+  type: mongoose.Schema.Types.ObjectId,
+  ref: "User",
+},
     },
 {
-    timestamp:true,
+    timestamps:true,
 }
 
 );

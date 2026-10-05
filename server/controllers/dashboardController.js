@@ -2,6 +2,7 @@ const Customer = require("../models/customer");
 const Lead = require("../models/Lead");
 const Task = require("../models/Task");
 const User = require("../models/User");
+
 const { getCache, setCache } = require("../utils/cache");
 
 const CACHE_TTL = 60;
@@ -9,9 +10,14 @@ const CACHE_TTL = 60;
 const getDashboard = async (req, res) => {
   try {
     const userId = req.user._id.toString();
-    const cacheKey = `dashboard:${userId}`;
+    const role = req.user.role;
 
-    // Check Redis
+    const cacheKey = `dashboard:${role}:${userId}`;
+
+    // =========================
+    // Redis Cache
+    // =========================
+
     const cachedDashboard = await getCache(cacheKey);
 
     if (cachedDashboard) {
@@ -26,56 +32,88 @@ const getDashboard = async (req, res) => {
     console.log("Dashboard Cache MISS");
 
     // =========================
-    // Customer Statistics
+    // Filters
     // =========================
 
-    const totalCustomers = await Customer.countDocuments();
+    const customerFilter = {};
+    const leadFilter = {};
+    const taskFilter = {};
+
+    // Sales sees only assigned records
+    if (role === "sales") {
+      customerFilter.assignedTo = req.user._id;
+      leadFilter.assignedTo = req.user._id;
+      taskFilter.assignedTo = req.user._id;
+    }
 
     // =========================
-    // Lead Statistics
+    // Customers
     // =========================
 
-    const totalLeads = await Lead.countDocuments();
-
-    const newLeads = await Lead.countDocuments({
-      status: "new",
-    });
-
-    const convertedLeads = await Lead.countDocuments({
-      status: "converted",
-    });
+    const totalCustomers =
+      await Customer.countDocuments(customerFilter);
 
     // =========================
-    // Task Statistics
+    // Leads
     // =========================
 
-    const totalTasks = await Task.countDocuments();
+    const totalLeads =
+      await Lead.countDocuments(leadFilter);
 
-    const pendingTasks = await Task.countDocuments({
-      status: "pending",
-    });
+    const newLeads =
+      await Lead.countDocuments({
+        ...leadFilter,
+        status: "new",
+      });
 
-    const completedTasks = await Task.countDocuments({
-      status: "completed",
-    });
-
-    const overdueTasks = await Task.countDocuments({
-      dueDate: {
-        $lt: new Date(),
-      },
-      status: {
-        $nin: ["completed", "cancelled"],
-      },
-    });
+    const convertedLeads =
+      await Lead.countDocuments({
+        ...leadFilter,
+        status: "converted",
+      });
 
     // =========================
-    // User Statistics
+    // Tasks
     // =========================
 
-    const totalUsers = await User.countDocuments();
+    const totalTasks =
+      await Task.countDocuments(taskFilter);
+
+    const pendingTasks =
+      await Task.countDocuments({
+        ...taskFilter,
+        status: "pending",
+      });
+
+    const completedTasks =
+      await Task.countDocuments({
+        ...taskFilter,
+        status: "completed",
+      });
+
+    const overdueTasks =
+      await Task.countDocuments({
+        ...taskFilter,
+        dueDate: {
+          $lt: new Date(),
+        },
+        status: {
+          $nin: ["completed", "cancelled"],
+        },
+      });
 
     // =========================
-    // Dashboard Response
+    // Users
+    // =========================
+
+    let totalUsers = 0;
+
+    if (role === "admin") {
+      totalUsers = await User.countDocuments();
+    }
+
+    // =========================
+    // Response
     // =========================
 
     const dashboardData = {
@@ -101,7 +139,10 @@ const getDashboard = async (req, res) => {
       },
     };
 
-    // Store in Redis
+    // =========================
+    // Redis
+    // =========================
+
     await setCache(
       cacheKey,
       dashboardData,
@@ -112,6 +153,7 @@ const getDashboard = async (req, res) => {
       ...dashboardData,
       source: "mongodb",
     });
+
   } catch (error) {
     console.error(
       "Dashboard Error:",
